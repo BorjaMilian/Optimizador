@@ -1,6 +1,8 @@
 import streamlit as st
 import pulp
 import pandas as pd
+import numpy as np
+import plotly.graph_objects as go
 
 st.set_page_config(page_title="Optimizador PLC", layout="wide")
 
@@ -50,17 +52,11 @@ for i in range(num_restricciones):
 st.divider()
 
 if st.button("🚀 Resolver Modelo", type="primary"):
-    # 1. Crear el problema
     sentido = pulp.LpMaximize if objetivo == "Maximizar" else pulp.LpMinimize
     prob = pulp.LpProblem("Problema_PLC", sentido)
-
-    # 2. Crear variables continuas (X >= 0)
     variables = [pulp.LpVariable(f"X{i+1}", lowBound=0, cat='Continuous') for i in range(num_vars)]
-
-    # 3. Añadir función objetivo
     prob += pulp.lpSum([coef_objetivo[i] * variables[i] for i in range(num_vars)]), "Z"
 
-    # 4. Añadir restricciones
     for i in range(num_restricciones):
         expr = pulp.lpSum([matriz_restricciones[i][j] * variables[j] for j in range(num_vars)])
         if simbolos_restricciones[i] == "<=":
@@ -70,29 +66,55 @@ if st.button("🚀 Resolver Modelo", type="primary"):
         else:
             prob += (expr == limites_restricciones[i], f"Restriccion_{i+1}")
 
-    # 5. Resolver el modelo
     prob.solve()
-
-    # 6. Mostrar Resultados
-    st.subheader("3. Resultados")
     estado = pulp.LpStatus[prob.status]
     
     if estado == "Optimal":
         st.success("¡Solución Óptima encontrada!")
-        st.metric(label="Valor de la Función Objetivo (Z)", value=round(pulp.value(prob.objective), 4))
         
-        # Tabla de variables
-        st.write("**Variables de Decisión:**")
-        var_data = [{"Variable": v.name, "Valor": round(v.varValue, 4)} for v in prob.variables()]
-        st.table(pd.DataFrame(var_data))
-        
-        # Tabla de saturación (Precios sombra y holgura)
-        st.write("**Análisis de Saturación:**")
-        rest_data = []
-        for name, c in prob.constraints.items():
-            holgura = round(c.slack, 4)
-            saturada = "Sí" if holgura == 0 else "No"
-            rest_data.append({"Restricción": name, "Saturada": saturada, "Holgura/Exceso": abs(holgura), "Precio Sombra": round(c.pi, 4)})
-        st.table(pd.DataFrame(rest_data))
+        col1, col2 = st.columns(2)
+        with col1:
+            st.metric(label="Valor de la Función Objetivo (Z)", value=round(pulp.value(prob.objective), 4))
+            st.write("**Variables de Decisión:**")
+            var_data = [{"Variable": v.name, "Valor": round(v.varValue, 4)} for v in prob.variables()]
+            st.table(pd.DataFrame(var_data))
+            
+        with col2:
+            st.write("**Análisis de Saturación:**")
+            rest_data = []
+            for name, c in prob.constraints.items():
+                holgura = round(c.slack, 4)
+                saturada = "Sí" if holgura == 0 else "No"
+                rest_data.append({"Restricción": name, "Saturada": saturada, "Holgura/Exceso": abs(holgura), "Precio Sombra": round(c.pi, 4)})
+            st.table(pd.DataFrame(rest_data))
+            
+        # Generar gráfica solo si hay 2 variables
+        if num_vars == 2:
+            st.subheader("Análisis Gráfico (2D)")
+            fig = go.Figure()
+            
+            x1_opt = prob.variables()[0].varValue
+            x2_opt = prob.variables()[1].varValue
+            max_x1 = max(100, x1_opt * 2) 
+            x1_vals = np.linspace(0, max_x1, 400)
+            
+            # Dibujar rectas de restricciones
+            for i in range(num_restricciones):
+                c1, c2 = matriz_restricciones[i][0], matriz_restricciones[i][1]
+                limite = limites_restricciones[i]
+                
+                if c2 != 0:
+                    x2_vals = (limite - c1 * x1_vals) / c2
+                    valid = x2_vals >= 0
+                    fig.add_trace(go.Scatter(x=x1_vals[valid], y=x2_vals[valid], mode='lines', name=f'Restricción {i+1}'))
+                elif c1 != 0:
+                    fig.add_vline(x=limite/c1, line_dash="dash", line_color="grey", annotation_text=f'Restricción {i+1}')
+            
+            # Dibujar Punto Óptimo
+            fig.add_trace(go.Scatter(x=[x1_opt], y=[x2_opt], mode='markers', marker=dict(color='red', size=12, symbol='star'), name='Punto Óptimo'))
+            
+            fig.update_layout(xaxis_title="X1", yaxis_title="X2", xaxis=dict(rangemode='tozero'), yaxis=dict(rangemode='tozero'), height=600)
+            st.plotly_chart(fig, use_container_width=True)
+            
     else:
         st.error(f"El modelo no tiene una solución óptima válida. Estado: {estado}")
