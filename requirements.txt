@@ -3,3 +3,4 @@ pulp
 pandas
 plotly
 numpy
+scipy
