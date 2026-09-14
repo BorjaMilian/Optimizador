@@ -1,12 +1,12 @@
 import streamlit as st
+import pulp
+import pandas as pd
 
-# 1. Configuración de la página
 st.set_page_config(page_title="Optimizador PLC", layout="wide")
 
 st.title("Calculadora de Programación Lineal")
 st.write("Usa el menú lateral para ajustar el tamaño de tu problema.")
 
-# 2. Panel lateral (Sidebar)
 st.sidebar.header("Parámetros del Modelo")
 objetivo = st.sidebar.selectbox("Tipo de optimización", ["Maximizar", "Minimizar"])
 num_vars = st.sidebar.number_input("Número de variables", min_value=2, max_value=10, value=2, step=1)
@@ -14,31 +14,21 @@ num_restricciones = st.sidebar.number_input("Número de restricciones", min_valu
 
 st.divider()
 
-# 3. Entradas para la Función Objetivo
 st.subheader("1. Función Objetivo (Z)")
-st.write("Introduce los coeficientes de cada variable para la función que quieres optimizar:")
-
-# Creamos columnas dinámicas según el número de variables elegido
 cols_obj = st.columns(num_vars)
 coef_objetivo = []
 for i in range(num_vars):
     with cols_obj[i]:
-        # Cada caja de texto se genera automáticamente
-        coef = st.number_input(f"Coeficiente de X{i+1}", value=0.0, step=1.0, key=f"obj_{i}")
+        coef = st.number_input(f"Coeficiente X{i+1}", value=0.0, step=1.0, key=f"obj_{i}")
         coef_objetivo.append(coef)
 
-# 4. Entradas para las Restricciones
 st.subheader("2. Restricciones")
-st.write("Introduce los coeficientes, el símbolo y el valor límite para cada restricción:")
-
 matriz_restricciones = []
 simbolos_restricciones = []
 limites_restricciones = []
 
-# Creamos tantas filas como restricciones haya elegido el usuario
 for i in range(num_restricciones):
     st.write(f"**Restricción {i+1}**")
-    # Columnas: variables + símbolo + límite
     cols_rest = st.columns(num_vars + 2)
     
     fila_coef = []
@@ -59,6 +49,50 @@ for i in range(num_restricciones):
 
 st.divider()
 
-# 5. Botón de Ejecución
 if st.button("🚀 Resolver Modelo", type="primary"):
-    st.success("¡Los datos se han leído correctamente! En el próximo paso conectaremos el motor matemático para resolverlo.")
+    # 1. Crear el problema
+    sentido = pulp.LpMaximize if objetivo == "Maximizar" else pulp.LpMinimize
+    prob = pulp.LpProblem("Problema_PLC", sentido)
+
+    # 2. Crear variables continuas (X >= 0)
+    variables = [pulp.LpVariable(f"X{i+1}", lowBound=0, cat='Continuous') for i in range(num_vars)]
+
+    # 3. Añadir función objetivo
+    prob += pulp.lpSum([coef_objetivo[i] * variables[i] for i in range(num_vars)]), "Z"
+
+    # 4. Añadir restricciones
+    for i in range(num_restricciones):
+        expr = pulp.lpSum([matriz_restricciones[i][j] * variables[j] for j in range(num_vars)])
+        if simbolos_restricciones[i] == "<=":
+            prob += (expr <= limites_restricciones[i], f"Restriccion_{i+1}")
+        elif simbolos_restricciones[i] == ">=":
+            prob += (expr >= limites_restricciones[i], f"Restriccion_{i+1}")
+        else:
+            prob += (expr == limites_restricciones[i], f"Restriccion_{i+1}")
+
+    # 5. Resolver el modelo
+    prob.solve()
+
+    # 6. Mostrar Resultados
+    st.subheader("3. Resultados")
+    estado = pulp.LpStatus[prob.status]
+    
+    if estado == "Optimal":
+        st.success("¡Solución Óptima encontrada!")
+        st.metric(label="Valor de la Función Objetivo (Z)", value=round(pulp.value(prob.objective), 4))
+        
+        # Tabla de variables
+        st.write("**Variables de Decisión:**")
+        var_data = [{"Variable": v.name, "Valor": round(v.varValue, 4)} for v in prob.variables()]
+        st.table(pd.DataFrame(var_data))
+        
+        # Tabla de saturación (Precios sombra y holgura)
+        st.write("**Análisis de Saturación:**")
+        rest_data = []
+        for name, c in prob.constraints.items():
+            holgura = round(c.slack, 4)
+            saturada = "Sí" if holgura == 0 else "No"
+            rest_data.append({"Restricción": name, "Saturada": saturada, "Holgura/Exceso": abs(holgura), "Precio Sombra": round(c.pi, 4)})
+        st.table(pd.DataFrame(rest_data))
+    else:
+        st.error(f"El modelo no tiene una solución óptima válida. Estado: {estado}")
