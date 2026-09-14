@@ -3,6 +3,8 @@ import pulp
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
+import itertools
+from scipy.spatial import ConvexHull
 
 st.set_page_config(page_title="Optimizador PLC", layout="wide")
 
@@ -98,7 +100,50 @@ if st.button("🚀 Resolver Modelo", type="primary"):
             max_x1 = max(100, x1_opt * 2) 
             x1_vals = np.linspace(0, max_x1, 400)
             
-            # Dibujar rectas de restricciones
+            # --- 1. Calcular Vértices de la Región Factible ---
+            lineas = [(1, 0, 0), (0, 1, 0)] # Ejes x1=0, x2=0
+            for i in range(num_restricciones):
+                lineas.append((matriz_restricciones[i][0], matriz_restricciones[i][1], limites_restricciones[i]))
+                
+            puntos_factibles = []
+            for l1, l2 in itertools.combinations(lineas, 2):
+                A = np.array([[l1[0], l1[1]], [l2[0], l2[1]]])
+                b = np.array([l1[2], l2[2]])
+                try:
+                    pt = np.linalg.solve(A, b)
+                    x1, x2 = round(pt[0], 5), round(pt[1], 5)
+                    
+                    if x1 >= -1e-5 and x2 >= -1e-5: # Condición de no negatividad
+                        valido = True
+                        for i in range(num_restricciones):
+                            val = matriz_restricciones[i][0]*x1 + matriz_restricciones[i][1]*x2
+                            lim = limites_restricciones[i]
+                            sim = simbolos_restricciones[i]
+                            if sim == "<=" and val > lim + 1e-4: valido = False
+                            elif sim == ">=" and val < lim - 1e-4: valido = False
+                            elif sim == "=" and abs(val - lim) > 1e-4: valido = False
+                        
+                        if valido:
+                            puntos_factibles.append([x1, x2])
+                except np.linalg.LinAlgError:
+                    pass # Rectas paralelas
+            
+            # --- 2. Dibujar Región Factible ---
+            if len(puntos_factibles) >= 3:
+                puntos_unicos = np.unique(puntos_factibles, axis=0)
+                if len(puntos_unicos) >= 3:
+                    hull = ConvexHull(puntos_unicos)
+                    vertices = puntos_unicos[hull.vertices]
+                    vertices = np.vstack((vertices, vertices[0])) # Cerrar el polígono
+                    
+                    fig.add_trace(go.Scatter(
+                        x=vertices[:,0], y=vertices[:,1], 
+                        fill='toself', fillcolor='rgba(0, 255, 128, 0.3)', 
+                        line=dict(color='rgba(255,255,255,0)'),
+                        name='Región Factible'
+                    ))
+
+            # --- 3. Dibujar rectas de restricciones ---
             for i in range(num_restricciones):
                 c1, c2 = matriz_restricciones[i][0], matriz_restricciones[i][1]
                 limite = limites_restricciones[i]
@@ -110,8 +155,15 @@ if st.button("🚀 Resolver Modelo", type="primary"):
                 elif c1 != 0:
                     fig.add_vline(x=limite/c1, line_dash="dash", line_color="grey", annotation_text=f'Restricción {i+1}')
             
-            # Dibujar Punto Óptimo
-            fig.add_trace(go.Scatter(x=[x1_opt], y=[x2_opt], mode='markers', marker=dict(color='red', size=12, symbol='star'), name='Punto Óptimo'))
+            # --- 4. Dibujar Punto Óptimo ---
+            fig.add_trace(go.Scatter(
+                x=[x1_opt], y=[x2_opt], 
+                mode='markers+text', 
+                marker=dict(color='red', size=12, symbol='star'), 
+                text=[f'Óptimo ({round(x1_opt,2)}, {round(x2_opt,2)})'],
+                textposition="top right",
+                name='Punto Óptimo'
+            ))
             
             fig.update_layout(xaxis_title="X1", yaxis_title="X2", xaxis=dict(rangemode='tozero'), yaxis=dict(rangemode='tozero'), height=600)
             st.plotly_chart(fig, use_container_width=True)
