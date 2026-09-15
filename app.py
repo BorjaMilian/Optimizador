@@ -2,171 +2,170 @@ import streamlit as st
 import pulp
 import pandas as pd
 import numpy as np
-import plotly.graph_objects as go
-import itertools
-from scipy.spatial import ConvexHull
+import matplotlib.pyplot as plt
 
-st.set_page_config(page_title="Optimizador PLC", layout="wide")
+st.title("Solucionador de Programación Lineal")
+st.write("Configura tu modelo, añade los coeficientes y resuélvelo.")
 
-st.title("Calculadora de Programación Lineal")
-st.write("Usa el menú lateral para ajustar el tamaño de tu problema.")
-
-st.sidebar.header("Parámetros del Modelo")
-objetivo = st.sidebar.selectbox("Tipo de optimización", ["Maximizar", "Minimizar"])
-num_vars = st.sidebar.number_input("Número de variables", min_value=2, max_value=10, value=2, step=1)
-num_restricciones = st.sidebar.number_input("Número de restricciones", min_value=1, max_value=20, value=2, step=1)
+# 1. Configuración de dimensiones
+col1, col2 = st.columns(2)
+with col1:
+    num_vars = st.number_input("Número de variables", min_value=2, value=2, step=1)
+with col2:
+    num_rest = st.number_input("Número de restricciones", min_value=1, value=2, step=1)
 
 st.divider()
 
-st.subheader("1. Función Objetivo (Z)")
+# 2. Interfaz para la Función Objetivo
+st.subheader("Función Objetivo")
+tipo_opt = st.selectbox("¿Qué deseas hacer?", ["Maximizar", "Minimizar"])
+
+st.write("Introduce los coeficientes (C):")
 cols_obj = st.columns(num_vars)
-coef_objetivo = []
+coeficientes_z = []
+
 for i in range(num_vars):
     with cols_obj[i]:
-        coef = st.number_input(f"Coeficiente X{i+1}", value=0.0, step=1.0, key=f"obj_{i}")
-        coef_objetivo.append(coef)
-
-st.subheader("2. Restricciones")
-matriz_restricciones = []
-simbolos_restricciones = []
-limites_restricciones = []
-
-for i in range(num_restricciones):
-    st.write(f"**Restricción {i+1}**")
-    cols_rest = st.columns(num_vars + 2)
-    
-    fila_coef = []
-    for j in range(num_vars):
-        with cols_rest[j]:
-            coef = st.number_input(f"X{j+1}", value=0.0, step=1.0, key=f"rest_{i}_x{j}")
-            fila_coef.append(coef)
-    
-    with cols_rest[num_vars]:
-        simbolo = st.selectbox("Símbolo", ["<=", ">=", "="], key=f"simbolo_{i}")
-    
-    with cols_rest[num_vars + 1]:
-        limite = st.number_input("Límite", value=0.0, step=1.0, key=f"limite_{i}")
-        
-    matriz_restricciones.append(fila_coef)
-    simbolos_restricciones.append(simbolo)
-    limites_restricciones.append(limite)
+        valor = st.number_input(f"X{i+1}", value=0.0, key=f"obj_{i}")
+        coeficientes_z.append(valor)
 
 st.divider()
 
-if st.button("🚀 Resolver Modelo", type="primary"):
-    sentido = pulp.LpMaximize if objetivo == "Maximizar" else pulp.LpMinimize
-    prob = pulp.LpProblem("Problema_PLC", sentido)
-    variables = [pulp.LpVariable(f"X{i+1}", lowBound=0, cat='Continuous') for i in range(num_vars)]
-    prob += pulp.lpSum([coef_objetivo[i] * variables[i] for i in range(num_vars)]), "Z"
+# 3. Interfaz para las Restricciones
+st.subheader("Restricciones")
+st.write("Introduce los coeficientes, el signo y el término independiente (b).")
 
-    for i in range(num_restricciones):
-        expr = pulp.lpSum([matriz_restricciones[i][j] * variables[j] for j in range(num_vars)])
-        if simbolos_restricciones[i] == "<=":
-            prob += (expr <= limites_restricciones[i], f"Restriccion_{i+1}")
-        elif simbolos_restricciones[i] == ">=":
-            prob += (expr >= limites_restricciones[i], f"Restriccion_{i+1}")
+datos_restricciones = []
+
+for i in range(num_rest):
+    st.markdown(f"**Restricción {i+1}**")
+    cols_rest = st.columns(num_vars + 2)
+    
+    coefs_r = []
+    for j in range(num_vars):
+        with cols_rest[j]:
+            val = st.number_input(f"X{j+1}", value=0.0, key=f"r_{i}_v_{j}")
+            coefs_r.append(val)
+            
+    with cols_rest[num_vars]:
+        signo = st.selectbox("Signo", ["<=", ">=", "="], key=f"signo_{i}")
+        
+    with cols_rest[num_vars + 1]:
+        limite = st.number_input("Límite (b)", value=0.0, key=f"limite_{i}")
+        
+    datos_restricciones.append({"coefs": coefs_r, "signo": signo, "limite": limite})
+
+st.caption("Nota: Se asume la condición de no negatividad para todas las variables (Xi ≥ 0).")
+
+st.divider()
+
+# 4. Botón y lógica de resolución
+if st.button("Resolver Modelo", type="primary"):
+    # Crear el problema en PuLP
+    sentido = pulp.LpMaximize if tipo_opt == "Maximizar" else pulp.LpMinimize
+    problema = pulp.LpProblem("Modelo_Usuario", sentido)
+    
+    # Crear las variables de decisión (con límite inferior 0)
+    variables = [pulp.LpVariable(f"X{j+1}", lowBound=0) for j in range(num_vars)]
+    
+    # Añadir la Función Objetivo
+    problema += pulp.lpSum([coeficientes_z[j] * variables[j] for j in range(num_vars)]), "Z"
+    
+    # Añadir las Restricciones
+    for i, rest in enumerate(datos_restricciones):
+        expresion = pulp.lpSum([rest["coefs"][j] * variables[j] for j in range(num_vars)])
+        if rest["signo"] == "<=":
+            problema += (expresion <= rest["limite"]), f"Restriccion_{i+1}"
+        elif rest["signo"] == ">=":
+            problema += (expresion >= rest["limite"]), f"Restriccion_{i+1}"
         else:
-            prob += (expr == limites_restricciones[i], f"Restriccion_{i+1}")
-
-    prob.solve()
-    estado = pulp.LpStatus[prob.status]
+            problema += (expresion == rest["limite"]), f"Restriccion_{i+1}"
+            
+    # Resolver
+    problema.solve()
+    estado = pulp.LpStatus[problema.status]
     
     if estado == "Optimal":
         st.success("¡Solución Óptima encontrada!")
+        st.metric(label=f"Valor de Z ({tipo_opt})", value=round(pulp.value(problema.objective), 4))
         
-        col1, col2 = st.columns(2)
-        with col1:
-            st.metric(label="Valor de la Función Objetivo (Z)", value=round(pulp.value(prob.objective), 4))
-            st.write("**Variables de Decisión:**")
-            var_data = [{"Variable": v.name, "Valor": round(v.varValue, 4)} for v in prob.variables()]
-            st.table(pd.DataFrame(var_data))
+        col_res1, col_res2 = st.columns(2)
+        
+        with col_res1:
+            st.subheader("Variables de Decisión")
+            vars_data = [{"Variable": v.name, "Valor Óptimo": v.varValue} for v in variables]
+            st.dataframe(pd.DataFrame(vars_data), hide_index=True)
             
-        with col2:
-            st.write("**Análisis de Saturación:**")
+        with col_res2:
+            st.subheader("Análisis de Restricciones")
             rest_data = []
-            for name, c in prob.constraints.items():
-                holgura = round(c.slack, 4)
-                saturada = "Sí" if holgura == 0 else "No"
-                rest_data.append({"Restricción": name, "Saturada": saturada, "Holgura/Exceso": abs(holgura), "Precio Sombra": round(c.pi, 4)})
-            st.table(pd.DataFrame(rest_data))
+            for name, constraint in problema.constraints.items():
+                rest_data.append({
+                    "Restricción": name.replace("Restriccion_", "R"),
+                    "Holgura / Exceso": abs(round(constraint.slack, 4)) if constraint.slack is not None else 0,
+                    "Precio Sombra": round(constraint.pi, 4) if constraint.pi is not None else 0,
+                    "Saturada": "Sí" if abs(constraint.slack) <= 1e-5 else "No"
+                })
+            st.dataframe(pd.DataFrame(rest_data), hide_index=True)
             
-        # Generar gráfica solo si hay 2 variables
+        # 5. Gráfica de la Región Factible (Solo para 2 variables)
         if num_vars == 2:
-            st.subheader("Análisis Gráfico (2D)")
-            fig = go.Figure()
+            st.divider()
+            st.subheader("Visualización del Modelo (2 Variables)")
             
-            x1_opt = prob.variables()[0].varValue
-            x2_opt = prob.variables()[1].varValue
-            max_x1 = max(100, x1_opt * 2) 
-            x1_vals = np.linspace(0, max_x1, 400)
-            
-            # --- 1. Calcular Vértices de la Región Factible ---
-            lineas = [(1, 0, 0), (0, 1, 0)] # Ejes x1=0, x2=0
-            for i in range(num_restricciones):
-                lineas.append((matriz_restricciones[i][0], matriz_restricciones[i][1], limites_restricciones[i]))
+            max_val = 10.0 
+            for rest in datos_restricciones:
+                a, b_coef = rest["coefs"][0], rest["coefs"][1]
+                c = rest["limite"]
+                if a > 0: max_val = max(max_val, (c / a) * 1.2)
+                if b_coef > 0: max_val = max(max_val, (c / b_coef) * 1.2)
                 
-            puntos_factibles = []
-            for l1, l2 in itertools.combinations(lineas, 2):
-                A = np.array([[l1[0], l1[1]], [l2[0], l2[1]]])
-                b = np.array([l1[2], l2[2]])
-                try:
-                    pt = np.linalg.solve(A, b)
-                    x1, x2 = round(pt[0], 5), round(pt[1], 5)
-                    
-                    if x1 >= -1e-5 and x2 >= -1e-5: # Condición de no negatividad
-                        valido = True
-                        for i in range(num_restricciones):
-                            val = matriz_restricciones[i][0]*x1 + matriz_restricciones[i][1]*x2
-                            lim = limites_restricciones[i]
-                            sim = simbolos_restricciones[i]
-                            if sim == "<=" and val > lim + 1e-4: valido = False
-                            elif sim == ">=" and val < lim - 1e-4: valido = False
-                            elif sim == "=" and abs(val - lim) > 1e-4: valido = False
-                        
-                        if valido:
-                            puntos_factibles.append([x1, x2])
-                except np.linalg.LinAlgError:
-                    pass # Rectas paralelas
-            
-            # --- 2. Dibujar Región Factible ---
-            if len(puntos_factibles) >= 3:
-                puntos_unicos = np.unique(puntos_factibles, axis=0)
-                if len(puntos_unicos) >= 3:
-                    hull = ConvexHull(puntos_unicos)
-                    vertices = puntos_unicos[hull.vertices]
-                    vertices = np.vstack((vertices, vertices[0])) # Cerrar el polígono
-                    
-                    fig.add_trace(go.Scatter(
-                        x=vertices[:,0], y=vertices[:,1], 
-                        fill='toself', fillcolor='rgba(0, 255, 128, 0.3)', 
-                        line=dict(color='rgba(255,255,255,0)'),
-                        name='Región Factible'
-                    ))
+            opt_x1, opt_x2 = variables[0].varValue, variables[1].varValue
+            max_val = max(max_val, opt_x1 * 1.2, opt_x2 * 1.2)
 
-            # --- 3. Dibujar rectas de restricciones ---
-            for i in range(num_restricciones):
-                c1, c2 = matriz_restricciones[i][0], matriz_restricciones[i][1]
-                limite = limites_restricciones[i]
+            x = np.linspace(0, max_val, 400)
+            y = np.linspace(0, max_val, 400)
+            X, Y = np.meshgrid(x, y)
+            
+            factible = np.ones_like(X, dtype=bool)
+            fig, ax = plt.subplots(figsize=(8, 6))
+
+            for i, rest in enumerate(datos_restricciones):
+                a, b_coef = rest["coefs"][0], rest["coefs"][1]
+                c, signo = rest["limite"], rest["signo"]
                 
-                if c2 != 0:
-                    x2_vals = (limite - c1 * x1_vals) / c2
-                    valid = x2_vals >= 0
-                    fig.add_trace(go.Scatter(x=x1_vals[valid], y=x2_vals[valid], mode='lines', name=f'Restricción {i+1}'))
-                elif c1 != 0:
-                    fig.add_vline(x=limite/c1, line_dash="dash", line_color="grey", annotation_text=f'Restricción {i+1}')
+                Z_eval = a * X + b_coef * Y
+                
+                if signo == "<=":
+                    factible = factible & (Z_eval <= c)
+                elif signo == ">=":
+                    factible = factible & (Z_eval >= c)
+                else:
+                    factible = factible & (np.abs(Z_eval - c) < (max_val * 0.005))
+                    
+                ax.contour(X, Y, Z_eval, levels=[c], colors=[f'C{i}'], linewidths=2, label=f'R{i+1}')
+
+            ax.imshow(factible.astype(int), extent=(0, max_val, 0, max_val), 
+                      origin='lower', cmap='Greens', alpha=0.3)
+
+            ax.plot(opt_x1, opt_x2, marker='*', color='red', markersize=15, label='Punto Óptimo')
             
-            # --- 4. Dibujar Punto Óptimo ---
-            fig.add_trace(go.Scatter(
-                x=[x1_opt], y=[x2_opt], 
-                mode='markers+text', 
-                marker=dict(color='red', size=12, symbol='star'), 
-                text=[f'Óptimo ({round(x1_opt,2)}, {round(x2_opt,2)})'],
-                textposition="top right",
-                name='Punto Óptimo'
-            ))
+            ax.set_xlim(0, max_val)
+            ax.set_ylim(0, max_val)
+            ax.set_xlabel("Variable X1")
+            ax.set_ylabel("Variable X2")
+            ax.grid(True, linestyle='--', alpha=0.6)
             
-            fig.update_layout(xaxis_title="X1", yaxis_title="X2", xaxis=dict(rangemode='tozero'), yaxis=dict(rangemode='tozero'), height=600)
-            st.plotly_chart(fig, use_container_width=True)
+            # Evitar warnings si no hay etiquetas en las restricciones
+            handles, labels = ax.get_legend_handles_labels()
+            if handles:
+                ax.legend()
+            
+            st.pyplot(fig)
+            
+        elif num_vars > 2:
+            st.info("La gráfica de la región factible solo está disponible para modelos de 2 variables, ya que no podemos representar geometrías de 3 o más dimensiones de forma plana.")
             
     else:
-        st.error(f"El modelo no tiene una solución óptima válida. Estado: {estado}")
+        st.error(f"El solucionador no encontró una solución óptima. Estado del modelo: {estado}")
+            
