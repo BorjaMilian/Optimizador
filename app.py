@@ -97,7 +97,13 @@ if st.button("🚀 Resolver Modelo", type="primary"):
             
             x1_opt = prob.variables()[0].varValue
             x2_opt = prob.variables()[1].varValue
-            max_x1 = max(100, x1_opt * 2) 
+            
+            # --- Ajuste dinámico de la escala X ---
+            cortes_x = [x1_opt * 2, 10] # Mínimos por defecto
+            for i in range(num_restricciones):
+                if matriz_restricciones[i][0] > 0:
+                    cortes_x.append(limites_restricciones[i] / matriz_restricciones[i][0])
+            max_x1 = max(cortes_x) * 1.1 # 10% de margen a la derecha
             x1_vals = np.linspace(0, max_x1, 400)
             
             # --- 1. Calcular Vértices de la Región Factible ---
